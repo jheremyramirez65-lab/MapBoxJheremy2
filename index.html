@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rastreo en Tiempo Real</title>
+
+  <!-- Mapbox -->
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.css" rel="stylesheet" />
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.js"></script>
+
+  <style>
+    body { margin: 0; padding: 0; }
+    #map { width: 100%; height: 100vh; }
+
+    #info-panel {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.85);
+      color: white;
+      padding: 15px;
+      border-radius: 10px;
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      z-index: 1;
+      width: 220px;
+    }
+
+    #btnMapa {
+      margin-top: 10px;
+      width: 100%;
+      padding: 8px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="map"></div>
+
+  <div id="info-panel">
+    <p><strong>Latitud:</strong> <span id="latitud">-</span></p>
+    <p><strong>Longitud:</strong> <span id="longitud">-</span></p>
+    <p><strong>Altitud:</strong> <span id="altitud">-</span></p>
+    <p><strong>Hora actual:</strong> <span id="hora">-</span></p>
+    <p><strong>Tipo de mapa:</strong> <span id="tipoMapa">Normal</span></p>
+    <button id="btnMapa">Cambiar tipo de mapa</button>
+  </div>
+
+  <script type="module">
+
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
+    import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-analytics.js";
+    import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js";
+
+    // Firebase config
+    const firebaseConfig = {
+      apiKey: "AIzaSyDv0OQ7Qz-TPM67IHM6Zk0hhJOls0cfUEY",
+      authDomain: "mapbox-jheremy.firebaseapp.com",
+      databaseURL: "https://mapbox-jheremy-default-rtdb.firebaseio.com",
+      projectId: "mapbox-jheremy",
+      storageBucket: "mapbox-jheremy.firebasestorage.app",
+      messagingSenderId: "10458904449",
+      appId: "1:10458904449:web:658afa9dd2255ecafc5a80"
+      };
+
+    const app = initializeApp(firebaseConfig);
+    const analytics = getAnalytics(app);
+    const database = getDatabase(app);
+
+    // Mapbox token
+    mapboxgl.accessToken = 'pk.eyJ1IjoiamVyZW15MTQwMiIsImEiOiJjbW0zdm42NDEwNHJ0Mm9wcjMwYm5vaTdwIn0.B8P21YJgkuhmBCRFteGz1Q';
+
+    const map = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/streets-v11',
+      center: [0, 0],
+      zoom: 15
+    });
+
+    const marker = new mapboxgl.Marker()
+      .setLngLat([0, 0])
+      .addTo(map);
+
+    const ubicacionRef = ref(database, 'ubicacion');
+
+    onValue(ubicacionRef, (snapshot) => {
+      const data = snapshot.val();
+
+      if (data && data.latitud && data.longitud) {
+        const { latitud, longitud, altitud } = data;
+
+        marker.setLngLat([longitud, latitud]);
+        map.setCenter([longitud, latitud]);
+
+        document.getElementById("latitud").textContent = latitud;
+        document.getElementById("longitud").textContent = longitud;
+        document.getElementById("altitud").textContent = altitud ?? "No disponible";
+      }
+    });
+
+    // Hora actual
+    function actualizarHora() {
+      const ahora = new Date();
+      document.getElementById("hora").textContent = ahora.toLocaleTimeString();
+    }
+
+    setInterval(actualizarHora, 1000);
+    actualizarHora();
+
+    // Cambiar tipo de mapa
+    let esSatelite = false;
+
+    document.getElementById("btnMapa").addEventListener("click", () => {
+      if (esSatelite) {
+        map.setStyle('mapbox://styles/mapbox/streets-v11');
+        document.getElementById("tipoMapa").textContent = "Normal";
+      } else {
+        map.setStyle('mapbox://styles/mapbox/satellite-streets-v12');
+        document.getElementById("tipoMapa").textContent = "Satélite";
+      }
+      esSatelite = !esSatelite;
+    });
+
+  </script>
+
+</body>
+</html>
