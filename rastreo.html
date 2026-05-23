@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rastreo en Tiempo Real</title>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.css" rel="stylesheet" />
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Arial, sans-serif;
+      background: #0d0d1a;
+      color: #eceff1;
+      overflow: hidden;
+    }
+
+    #map { width: 100%; height: 100vh; }
+
+    /* ── Info card ── */
+    #info-card {
+      position: absolute;
+      top: 12px; left: 12px;
+      background: rgba(26,26,46,0.92);
+      border: 1px solid rgba(79,195,247,0.3);
+      border-radius: 12px;
+      padding: 12px 14px;
+      z-index: 10;
+      min-width: 190px;
+    }
+    #info-card .card-title {
+      color: #4FC3F7;
+      font-size: 10px;
+      font-weight: bold;
+      letter-spacing: 0.1em;
+      margin-bottom: 6px;
+    }
+    #info-card .data-row {
+      font-family: monospace;
+      font-size: 12px;
+      line-height: 1.8;
+      color: #eceff1;
+    }
+    #tvEstadoGeocerca {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #b0bec5;
+    }
+
+    /* ── Botón abrir drawer ── */
+    #btnAbrirPanel {
+      position: absolute;
+      top: 12px; right: 12px;
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      background: rgba(26,26,46,0.92);
+      border: 1px solid rgba(79,195,247,0.3);
+      color: #4FC3F7;
+      font-size: 20px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 10;
+      transition: background 0.2s;
+    }
+    #btnAbrirPanel:hover { background: rgba(79,195,247,0.15); }
+
+    /* ── Botón tipo mapa ── */
+    #btnMapa {
+      position: absolute;
+      bottom: 80px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(21,101,192,0.9);
+      border: none;
+      border-radius: 20px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: bold;
+      padding: 8px 18px;
+      cursor: pointer;
+      z-index: 10;
+      transition: background 0.2s;
+    }
+    #btnMapa:hover { background: rgba(21,101,192,1); }
+
+    /* ── Botón seguir ── */
+    #btnSeguir {
+      position: absolute;
+      bottom: 120px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(21,101,192,0.9);
+      border: none;
+      border-radius: 20px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: bold;
+      padding: 8px 18px;
+      cursor: pointer;
+      z-index: 10;
+      display: none;
+    }
+
+    /* ── Estado conexión ── */
+    #statusBar {
+      position: absolute;
+      bottom: 12px; left: 12px;
+      background: rgba(26,26,46,0.85);
+      border: 1px solid rgba(79,195,247,0.2);
+      border-radius: 8px;
+      padding: 5px 12px;
+      font-size: 11px;
+      color: #78909c;
+      z-index: 10;
+    }
+    #statusBar .dot {
+      display: inline-block;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #546e7a;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    #statusBar .dot.online { background: #66bb6a; }
+
+    /* ══════════════════════════════════════════
+       DRAWER / PANEL LATERAL
+    ══════════════════════════════════════════ */
+    #overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 20;
+    }
+    #drawer {
+      position: fixed;
+      top: 0; right: -300px; bottom: 0;
+      width: 280px;
+      background: rgba(14,14,28,0.98);
+      border-left: 1px solid rgba(79,195,247,0.15);
+      z-index: 21;
+      display: flex; flex-direction: column;
+      transition: right 0.3s ease;
+      padding-bottom: 16px;
+    }
+    #drawer.open { right: 0; }
+
+    .drawer-header {
+      padding: 48px 20px 12px;
+      color: #4FC3F7;
+      font-size: 13px;
+      font-weight: bold;
+      letter-spacing: 0.1em;
+    }
+
+    .section-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 20px 8px;
+      color: #78909c;
+      font-size: 10px;
+      font-weight: bold;
+      letter-spacing: 0.1em;
+    }
+    .counter-badge {
+      background: rgba(255,255,255,0.1);
+      color: #4FC3F7;
+      font-size: 10px;
+      font-weight: bold;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .list-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 12px;
+    }
+    .list-scroll::-webkit-scrollbar { width: 4px; }
+    .list-scroll::-webkit-scrollbar-thumb { background: #2a2a4a; border-radius: 2px; }
+
+    .list-item {
+      background: #1e1e38;
+      border: 1px solid #2a2a4a;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 7px;
+    }
+    .list-item .item-name {
+      color: #4FC3F7;
+      font-size: 13px;
+      font-weight: bold;
+    }
+    .list-item .item-sub {
+      color: #78909c;
+      font-size: 10px;
+      margin-top: 2px;
+    }
+    .list-item .item-coords {
+      color: #455a64;
+      font-size: 10px;
+    }
+    .empty-msg {
+      color: #455a64;
+      font-size: 12px;
+      padding: 8px;
+    }
+
+    .drawer-divider {
+      height: 1px;
+      background: #1e1e38;
+      margin: 8px 20px;
+    }
+
+    #btnCerrarPanel {
+      margin: 8px 20px 0;
+      height: 36px;
+      background: #1e1e38;
+      border: 1px solid #2a2a4a;
+      border-radius: 8px;
+      color: #78909c;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #btnCerrarPanel:hover { background: #2a2a4a; }
+
+    /* ── Hora ── */
+    #hora-badge {
+      position: absolute;
+      bottom: 12px; right: 12px;
+      background: rgba(26,26,46,0.85);
+      border: 1px solid rgba(79,195,247,0.15);
+      border-radius: 8px;
+      padding: 5px 12px;
+      font-size: 11px;
+      font-family: monospace;
+      color: #4FC3F7;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- Info card -->
+<div id="info-card">
+  <div class="card-title">📍 POSICIÓN ACTIVA</div>
+  <div class="data-row" id="dataRows">Esperando datos...</div>
+  <div id="tvEstadoGeocerca">⬜ Sin geocercas</div>
+</div>
+
+<!-- Botón abrir panel -->
+<button id="btnAbrirPanel" title="Abrir panel">☰</button>
+
+<!-- Botón tipo mapa -->
+<button id="btnMapa">🗺 Cambiar mapa: Normal</button>
+
+<!-- Botón seguir -->
+<button id="btnSeguir">📍 Seguir posición</button>
+
+<!-- Status bar -->
+<div id="statusBar">
+  <span class="dot" id="statusDot"></span>
+  <span id="statusTxt">Conectando...</span>
+</div>
+
+<!-- Hora -->
+<div id="hora-badge" id="horaBadge">--:--:--</div>
+
+<!-- Overlay + Drawer -->
+<div id="overlay"></div>
+<div id="drawer">
+  <div class="drawer-header">📊 RESUMEN</div>
+
+  <div class="section-label">
+    <span>🛰 DISPOSITIVOS</span>
+    <span class="counter-badge" id="cntDispositivos">0</span>
+  </div>
+  <div class="list-scroll" id="listaDispositivos">
+    <p class="empty-msg">Sin dispositivos conectados</p>
+  </div>
+
+  <div class="drawer-divider"></div>
+
+  <div class="section-label">
+    <span>📍 GEOCERCAS</span>
+    <span class="counter-badge" id="cntGeocercas">0</span>
+  </div>
+  <div class="list-scroll" id="listaGeocercas">
+    <p class="empty-msg">Sin geocercas creadas</p>
+  </div>
+
+  <button id="btnCerrarPanel">✕ Cerrar</button>
+</div>
+
+<script type="module">
+  import { initializeApp }  from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
+  import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js";
+
+  /* ══════════════════════════════════════════
+     FIREBASE CONFIG — igual que tu app
+  ══════════════════════════════════════════ */
+  const firebaseConfig = {
+    apiKey: "AIzaSyDv0OQ7Qz-TPM67IHM6Zk0hhJOls0cfUEY",
+    authDomain: "mapbox-jheremy.firebaseapp.com",
+    databaseURL: "https://mapbox-jheremy-default-rtdb.firebaseio.com",
+    projectId: "mapbox-jheremy",
+    storageBucket: "mapbox-jheremy.firebasestorage.app",
+    messagingSenderId: "10458904449",
+    appId: "1:10458904449:web:658afa9dd2255ecafc5a80"
+  };
+
+  const app      = initializeApp(firebaseConfig);
+  const database = getDatabase(app);
+
+  /* ══════════════════════════════════════════
+     MAPBOX
+  ══════════════════════════════════════════ */
+  mapboxgl.accessToken = 'pk.eyJ1IjoiamVyZW15MTQwMiIsImEiOiJjbW0zdm42NDEwNHJ0Mm9wcjMwYm5vaTdwIn0.B8P21YJgkuhmBCRFteGz1Q';
+
+  const map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/dark-v11',   // dark para que coincida con tu app
+    center: [-64.73, -21.53],
+    zoom: 14
+  });
+
+  map.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
+
+  /* ══════════════════════════════════════════
+     ESTADO GLOBAL
+  ══════════════════════════════════════════ */
+  const marcadores    = {};   // id → Marker
+  const popups        = {};   // id → Popup
+  const geocercas     = [];
+  const rutasEscuchadas = new Set();
+  let esSatelite      = false;
+  let camaraSiguiendo = true;
+  let primeraPosicion = true;
+
+  /* ══════════════════════════════════════════
+     HORA
+  ══════════════════════════════════════════ */
+  const horaBadge = document.getElementById('hora-badge');
+  setInterval(() => {
+    horaBadge.textContent = new Date().toLocaleTimeString('es-BO');
+  }, 1000);
+
+  /* ══════════════════════════════════════════
+     DRAWER
+  ══════════════════════════════════════════ */
+  const drawer  = document.getElementById('drawer');
+  const overlay = document.getElementById('overlay');
+
+  document.getElementById('btnAbrirPanel').onclick = () => {
+    drawer.classList.add('open');
+    overlay.style.display = 'block';
+  };
+  const cerrarDrawer = () => {
+    drawer.classList.remove('open');
+    overlay.style.display = 'none';
+  };
+  document.getElementById('btnCerrarPanel').onclick = cerrarDrawer;
+  overlay.onclick = cerrarDrawer;
+
+  /* ══════════════════════════════════════════
+     CAMBIO TIPO MAPA
+  ══════════════════════════════════════════ */
+  document.getElementById('btnMapa').onclick = () => {
+    esSatelite = !esSatelite;
+    map.setStyle(esSatelite
+      ? 'mapbox://styles/mapbox/satellite-streets-v12'
+      : 'mapbox://styles/mapbox/dark-v11');
+    document.getElementById('btnMapa').textContent =
+      esSatelite ? '🗺 Cambiar mapa: Satélite' : '🗺 Cambiar mapa: Normal';
+  };
+
+  /* ══════════════════════════════════════════
+     BOTÓN SEGUIR
+  ══════════════════════════════════════════ */
+  document.getElementById('btnSeguir').onclick = () => {
+    camaraSiguiendo = true;
+    document.getElementById('btnSeguir').style.display = 'none';
+  };
+
+  map.on('dragstart', () => {
+    if (camaraSiguiendo) {
+      camaraSiguiendo = false;
+      document.getElementById('btnSeguir').style.display = 'block';
+    }
+  });
+
+  /* ══════════════════════════════════════════
+     STATUS FIREBASE
+  ══════════════════════════════════════════ */
+  function setStatus(online, msg) {
+    document.getElementById('statusDot').className = 'dot' + (online ? ' online' : '');
+    document.getElementById('statusTxt').textContent = msg;
+  }
+
+  /* ══════════════════════════════════════════
+     VERIFICAR GEOCERCAS
+  ══════════════════════════════════════════ */
+  function haversineMetros(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2)**2 +
+              Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  function verificarGeocercas(lat, lon) {
+    for (const g of geocercas) {
+      const dist = haversineMetros(lat, lon, g.latitudCentro, g.longitudCentro);
+      if (dist <= g.radio) return `🟢 Dentro: ${g.nombre}`;
+    }
+    return geocercas.length ? '🔴 Fuera de geocercas' : '⬜ Sin geocercas';
+  }
+
+  /* ══════════════════════════════════════════
+     ACTUALIZAR PANEL LATERAL
+  ══════════════════════════════════════════ */
+  function renderLista(containerId, counterId, items, renderFn, emptyMsg) {
+    const container = document.getElementById(containerId);
+    const counter   = document.getElementById(counterId);
+    counter.textContent = items.length;
+    container.innerHTML = '';
+    if (!items.length) {
+      container.innerHTML = `<p class="empty-msg">${emptyMsg}</p>`;
+      return;
+    }
+    items.forEach(item => container.appendChild(renderFn(item)));
+  }
+
+  function crearItemDispositivo({ id, nombre }) {
+    const div = document.createElement('div');
+    div.className = 'list-item';
+    div.innerHTML = `
+      <div class="item-name">📡 ${nombre}</div>
+      <div class="item-sub">ID: ${id}</div>`;
+    div.style.cursor = 'pointer';
+    div.onclick = () => {
+      const m = marcadores[id];
+      if (m) {
+        map.flyTo({ center: m.getLngLat(), zoom: 16 });
+        cerrarDrawer();
+      }
+    };
+    return div;
+  }
+
+  function crearItemGeocerca(g) {
+    const div = document.createElement('div');
+    div.className = 'list-item';
+    div.innerHTML = `
+      <div class="item-name">📍 ${g.nombre}</div>
+      <div class="item-sub">Radio: ${Math.round(g.radio)} m</div>
+      <div class="item-coords">Lat: ${g.latitudCentro.toFixed(5)}  Lon: ${g.longitudCentro.toFixed(5)}</div>`;
+    div.style.cursor = 'pointer';
+    div.onclick = () => {
+      map.flyTo({ center: [g.longitudCentro, g.latitudCentro], zoom: calcularZoom(g.radio) });
+      cerrarDrawer();
+    };
+    return div;
+  }
+
+  function calcularZoom(r) {
+    if (r <= 50) return 18; if (r <= 100) return 17; if (r <= 250) return 16;
+    if (r <= 500) return 15; if (r <= 1000) return 14; if (r <= 3000) return 13; return 12;
+  }
+
+  /* ══════════════════════════════════════════
+     MARCADORES
+  ══════════════════════════════════════════ */
+  function crearElementoMarcador(nombre, color) {
+    const el = document.createElement('div');
+    el.style.cssText = `
+      background: ${color};
+      border: 2px solid rgba(255,255,255,0.4);
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      box-shadow: 0 0 0 4px ${color}44;
+      cursor: pointer;
+    `;
+    return el;
+  }
+
+  const COLORES = ['#4FC3F7','#FF9800','#66BB6A','#E040FB','#FF5252','#FFD740'];
+  let colorIdx = 0;
+
+  function actualizarMarcador(id, nombre, lat, lon) {
+    const lngLat = [lon, lat];
+    if (!marcadores[id]) {
+      const color = COLORES[colorIdx++ % COLORES.length];
+      const popup = new mapboxgl.Popup({ offset: 20, closeButton: false, closeOnClick: false })
+        .setHTML(`<div style="font-size:12px;font-weight:bold;color:#1a1a2e">${nombre}</div>`);
+      const marker = new mapboxgl.Marker({ element: crearElementoMarcador(nombre, color) })
+        .setLngLat(lngLat)
+        .setPopup(popup)
+        .addTo(map);
+      marker.togglePopup();
+      marcadores[id] = marker;
+      popups[id]     = popup;
+    } else {
+      marcadores[id].setLngLat(lngLat);
+      popups[id]?.setHTML(`<div style="font-size:12px;font-weight:bold;color:#1a1a2e">${nombre}</div>`);
+    }
+  }
+
+  /* ══════════════════════════════════════════
+     RUTAS (historial de recorrido)
+  ══════════════════════════════════════════ */
+  function escucharRuta(id) {
+    onValue(ref(database, `rutas/${id}`), snapshot => {
+      const puntos = [];
+      snapshot.forEach(p => {
+        const lat = p.child('latitud').val();
+        const lon = p.child('longitud').val();
+        if (lat && lon) puntos.push([lon, lat]);
+      });
+      if (puntos.length < 2) return;
+      dibujarRuta(id, puntos);
+    });
+  }
+
+  function dibujarRuta(id, puntos) {
+    const srcId = `ruta-src-${id}`;
+    const layId = `ruta-lay-${id}`;
+    const geojson = { type: 'Feature', geometry: { type: 'LineString', coordinates: puntos } };
+
+    if (map.getSource(srcId)) {
+      map.getSource(srcId).setData(geojson);
+    } else {
+      map.addSource(srcId, { type: 'geojson', data: geojson });
+      map.addLayer({ id: layId, type: 'line', source: srcId, paint: {
+        'line-color': '#FF4444', 'line-width': 3, 'line-opacity': 0.8
+      }});
+    }
+  }
+
+  /* ══════════════════════════════════════════
+     GEOCERCAS (dibujar círculos)
+  ══════════════════════════════════════════ */
+  function generarCirculoGeoJSON(lat, lon, radio) {
+    const pts = [];
+    for (let i = 0; i <= 360; i += 6) {
+      const ang = i * Math.PI / 180;
+      pts.push([
+        lon + (radio * Math.sin(ang)) / (111320 * Math.cos(lat * Math.PI / 180)),
+        lat + (radio * Math.cos(ang)) / 111320
+      ]);
+    }
+    pts.push(pts[0]);
+    return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [pts] } };
+  }
+
+  function dibujarGeocercas() {
+    geocercas.forEach((g, i) => {
+      const srcId = `cerca-src-${i}`;
+      const layFill = `cerca-fill-${i}`;
+      const layLine = `cerca-line-${i}`;
+      const geojson = generarCirculoGeoJSON(g.latitudCentro, g.longitudCentro, g.radio);
+      if (map.getSource(srcId)) {
+        map.getSource(srcId).setData(geojson);
+      } else {
+        map.addSource(srcId, { type: 'geojson', data: geojson });
+        map.addLayer({ id: layFill, type: 'fill', source: srcId, paint: {
+          'fill-color': '#2196F3', 'fill-opacity': 0.2
+        }});
+        map.addLayer({ id: layLine, type: 'line', source: srcId, paint: {
+          'line-color': '#1565C0', 'line-width': 2
+        }});
+      }
+    });
+  }
+
+  /* ══════════════════════════════════════════
+     FIREBASE — escuchar dispositivos
+  ══════════════════════════════════════════ */
+  const dispositivosMap = {};
+
+  onValue(ref(database, 'ubicaciones'), snapshot => {
+    let hayDatos = false;
+    snapshot.forEach(device => {
+      const id     = device.key;
+      const nombre = device.child('nombre').val() || id;
+      const lat    = device.child('latitud').val();
+      const lon    = device.child('longitud').val();
+      const alt    = device.child('altitud').val();
+      const hora   = device.child('hora').val();
+
+      if (lat && lon) {
+        hayDatos = true;
+        actualizarMarcador(id, nombre, lat, lon);
+        dispositivosMap[id] = { id, nombre, lat, lon };
+
+        // Actualiza info card con el último dispositivo (o puedes mostrar el tuyo específico)
+        document.getElementById('dataRows').innerHTML =
+          `Lat: ${lat.toFixed(6)}<br>Lon: ${lon.toFixed(6)}<br>Alt: ${alt ? alt.toFixed(1) + ' m' : 'N/D'}<br>Hora: ${hora || '--'}`;
+        document.getElementById('tvEstadoGeocerca').textContent = verificarGeocercas(lat, lon);
+
+        if (camaraSiguiendo && primeraPosicion) {
+          primeraPosicion = false;
+          map.flyTo({ center: [lon, lat], zoom: 15 });
+        } else if (camaraSiguiendo) {
+          map.setCenter([lon, lat]);
+        }
+
+        if (!rutasEscuchadas.has(id)) {
+          rutasEscuchadas.add(id);
+          escucharRuta(id);
+        }
+      }
+    });
+
+    renderLista('listaDispositivos', 'cntDispositivos',
+      Object.values(dispositivosMap), crearItemDispositivo, 'Sin dispositivos conectados');
+
+    setStatus(hayDatos, hayDatos ? 'Conectado · Firebase' : 'Sin datos aún');
+  }, err => {
+    setStatus(false, 'Error de conexión');
+    console.error(err);
+  });
+
+  /* ══════════════════════════════════════════
+     FIREBASE — escuchar geocercas
+  ══════════════════════════════════════════ */
+  onValue(ref(database, 'geocercas'), snapshot => {
+    geocercas.length = 0;
+    snapshot.forEach(item => {
+      const g = item.val();
+      if (g && g.latitudCentro && g.longitudCentro && g.radio) geocercas.push(g);
+    });
+
+    renderLista('listaGeocercas', 'cntGeocercas',
+      geocercas, crearItemGeocerca, 'Sin geocercas creadas');
+
+    // Redibujar cuando el mapa esté listo
+    if (map.isStyleLoaded()) {
+      dibujarGeocercas();
+    } else {
+      map.once('style.load', dibujarGeocercas);
+    }
+  });
+
+  // Redibujar rutas/geocercas al cambiar de estilo (satélite ↔ normal)
+  map.on('style.load', () => {
+    dibujarGeocercas();
+    rutasEscuchadas.forEach(id => {
+      // Las rutas se recrgarán via el listener activo de Firebase
+    });
+  });
+
+  /* ══════════════════════════════════════════
+     FALLBACK: nodo antiguo "ubicacion" (singular)
+  ══════════════════════════════════════════ */
+  onValue(ref(database, 'ubicacion'), snapshot => {
+    const data = snapshot.val();
+    if (data?.latitud && data?.longitud) {
+      actualizarMarcador('_legacy', 'GPS', data.latitud, data.longitud);
+    }
+  });
+</script>
+</body>
+</html>
