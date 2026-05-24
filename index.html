@@ -268,7 +268,7 @@
 </div>
 
 <!-- Hora -->
-<div id="hora-badge" id="horaBadge">--:--:--</div>
+<div id="hora-badge">--:--:--</div>
 
 <!-- Overlay + Drawer -->
 <div id="overlay"></div>
@@ -301,7 +301,7 @@
   import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-database.js";
 
   /* ══════════════════════════════════════════
-     FIREBASE CONFIG — igual que tu app
+     FIREBASE CONFIG
   ══════════════════════════════════════════ */
   const firebaseConfig = {
     apiKey: "AIzaSyDv0OQ7Qz-TPM67IHM6Zk0hhJOls0cfUEY",
@@ -323,7 +323,7 @@
 
   const map = new mapboxgl.Map({
     container: 'map',
-    style: 'mapbox://styles/mapbox/dark-v11',   // dark para que coincida con tu app
+    style: 'mapbox://styles/mapbox/dark-v11',
     center: [-64.73, -21.53],
     zoom: 14
   });
@@ -333,13 +333,13 @@
   /* ══════════════════════════════════════════
      ESTADO GLOBAL
   ══════════════════════════════════════════ */
-  const marcadores    = {};   // id → Marker
-  const popups        = {};   // id → Popup
-  const geocercas     = [];
+  const marcadores      = {};
+  const popups          = {};
+  const geocercas       = [];
   const rutasEscuchadas = new Set();
-  let esSatelite      = false;
-  let camaraSiguiendo = true;
-  let primeraPosicion = true;
+  let esSatelite        = false;
+  let camaraSiguiendo   = true;
+  let primeraPosicion   = true;
 
   /* ══════════════════════════════════════════
      HORA
@@ -403,26 +403,57 @@
 
   /* ══════════════════════════════════════════
      VERIFICAR GEOCERCAS
+     — Soporta CIRCULAR y POLIGONAL (ray-casting)
   ══════════════════════════════════════════ */
   function haversineMetros(lat1, lon1, lat2, lon2) {
     const R = 6371000;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat/2)**2 +
-              Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const a = Math.sin(dLat / 2) ** 2 +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  /**
+   * Ray-casting: igual al algoritmo de tu app Android.
+   * puntos = [{lat, lng}, ...]
+   */
+  function puntoDentroDePoligono(lat, lon, puntos) {
+    if (!puntos || puntos.length < 3) return false;
+    let dentro = false;
+    let j = puntos.length - 1;
+    for (let i = 0; i < puntos.length; i++) {
+      const xi = puntos[i].lng ?? puntos[i].lon;
+      const yi = puntos[i].lat;
+      const xj = puntos[j].lng ?? puntos[j].lon;
+      const yj = puntos[j].lat;
+      if (xi == null || yi == null || xj == null || yj == null) { j = i; continue; }
+      const intersecta = ((yi > lat) !== (yj > lat)) &&
+                         (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+      if (intersecta) dentro = !dentro;
+      j = i;
+    }
+    return dentro;
   }
 
   function verificarGeocercas(lat, lon) {
     for (const g of geocercas) {
-      const dist = haversineMetros(lat, lon, g.latitudCentro, g.longitudCentro);
-      if (dist <= g.radio) return `🟢 Dentro: ${g.nombre}`;
+      let dentro = false;
+      if (g.tipo === 'poligono') {
+        dentro = puntoDentroDePoligono(lat, lon, g.puntos || []);
+      } else {
+        // Circular (legacy o tipo "circulo")
+        const dist = haversineMetros(lat, lon, g.latitudCentro, g.longitudCentro);
+        dentro = dist <= g.radio;
+      }
+      if (dentro) return `🟢 Dentro: ${g.nombre}`;
     }
     return geocercas.length ? '🔴 Fuera de geocercas' : '⬜ Sin geocercas';
   }
 
   /* ══════════════════════════════════════════
-     ACTUALIZAR PANEL LATERAL
+     PANEL LATERAL — listas
   ══════════════════════════════════════════ */
   function renderLista(containerId, counterId, items, renderFn, emptyMsg) {
     const container = document.getElementById(containerId);
@@ -445,10 +476,7 @@
     div.style.cursor = 'pointer';
     div.onclick = () => {
       const m = marcadores[id];
-      if (m) {
-        map.flyTo({ center: m.getLngLat(), zoom: 16 });
-        cerrarDrawer();
-      }
+      if (m) { map.flyTo({ center: m.getLngLat(), zoom: 16 }); cerrarDrawer(); }
     };
     return div;
   }
@@ -456,34 +484,60 @@
   function crearItemGeocerca(g) {
     const div = document.createElement('div');
     div.className = 'list-item';
+
+    // Construir subtítulo según tipo
+    let subTitulo = '';
+    let coords    = '';
+    if (g.tipo === 'poligono') {
+      const nPuntos = Array.isArray(g.puntos) ? g.puntos.length : 0;
+      subTitulo = `Polígono · ${nPuntos} puntos`;
+    } else {
+      subTitulo = `Círculo · ${Math.round(g.radio)} m`;
+      coords    = `Lat: ${(g.latitudCentro || 0).toFixed(5)}  Lon: ${(g.longitudCentro || 0).toFixed(5)}`;
+    }
+
     div.innerHTML = `
       <div class="item-name">📍 ${g.nombre}</div>
-      <div class="item-sub">Radio: ${Math.round(g.radio)} m</div>
-      <div class="item-coords">Lat: ${g.latitudCentro.toFixed(5)}  Lon: ${g.longitudCentro.toFixed(5)}</div>`;
+      <div class="item-sub">${subTitulo}</div>
+      ${coords ? `<div class="item-coords">${coords}</div>` : ''}`;
     div.style.cursor = 'pointer';
     div.onclick = () => {
-      map.flyTo({ center: [g.longitudCentro, g.latitudCentro], zoom: calcularZoom(g.radio) });
+      if (g.tipo === 'poligono' && Array.isArray(g.puntos) && g.puntos.length) {
+        // Volar al centro promedio del polígono
+        const lats = g.puntos.map(p => p.lat);
+        const lngs = g.puntos.map(p => p.lng ?? p.lon ?? 0);
+        const cLat = lats.reduce((a, b) => a + b, 0) / lats.length;
+        const cLon = lngs.reduce((a, b) => a + b, 0) / lngs.length;
+        map.flyTo({ center: [cLon, cLat], zoom: 15 });
+      } else if (g.latitudCentro && g.longitudCentro) {
+        map.flyTo({ center: [g.longitudCentro, g.latitudCentro], zoom: calcularZoom(g.radio) });
+      }
       cerrarDrawer();
     };
     return div;
   }
 
   function calcularZoom(r) {
-    if (r <= 50) return 18; if (r <= 100) return 17; if (r <= 250) return 16;
-    if (r <= 500) return 15; if (r <= 1000) return 14; if (r <= 3000) return 13; return 12;
+    if (r <= 50)   return 18;
+    if (r <= 100)  return 17;
+    if (r <= 250)  return 16;
+    if (r <= 500)  return 15;
+    if (r <= 1000) return 14;
+    if (r <= 3000) return 13;
+    return 12;
   }
 
   /* ══════════════════════════════════════════
      MARCADORES
   ══════════════════════════════════════════ */
-  function crearElementoMarcador(nombre, color) {
+  function crearElementoMarcador() {
     const el = document.createElement('div');
     el.style.cssText = `
-      background: ${color};
+      background: #4FC3F7;
       border: 2px solid rgba(255,255,255,0.4);
       width: 14px; height: 14px;
       border-radius: 50%;
-      box-shadow: 0 0 0 4px ${color}44;
+      box-shadow: 0 0 0 4px #4FC3F744;
       cursor: pointer;
     `;
     return el;
@@ -496,9 +550,12 @@
     const lngLat = [lon, lat];
     if (!marcadores[id]) {
       const color = COLORES[colorIdx++ % COLORES.length];
+      const el    = crearElementoMarcador();
+      el.style.background  = color;
+      el.style.boxShadow   = `0 0 0 4px ${color}44`;
       const popup = new mapboxgl.Popup({ offset: 20, closeButton: false, closeOnClick: false })
         .setHTML(`<div style="font-size:12px;font-weight:bold;color:#1a1a2e">${nombre}</div>`);
-      const marker = new mapboxgl.Marker({ element: crearElementoMarcador(nombre, color) })
+      const marker = new mapboxgl.Marker({ element: el })
         .setLngLat(lngLat)
         .setPopup(popup)
         .addTo(map);
@@ -528,10 +585,9 @@
   }
 
   function dibujarRuta(id, puntos) {
-    const srcId = `ruta-src-${id}`;
-    const layId = `ruta-lay-${id}`;
+    const srcId  = `ruta-src-${id}`;
+    const layId  = `ruta-lay-${id}`;
     const geojson = { type: 'Feature', geometry: { type: 'LineString', coordinates: puntos } };
-
     if (map.getSource(srcId)) {
       map.getSource(srcId).setData(geojson);
     } else {
@@ -543,9 +599,10 @@
   }
 
   /* ══════════════════════════════════════════
-     GEOCERCAS (dibujar círculos)
+     GEOCERCAS — dibujar en mapa
+     Soporta CIRCULAR y POLIGONAL
   ══════════════════════════════════════════ */
-  function generarCirculoGeoJSON(lat, lon, radio) {
+  function generarCirculoCoords(lat, lon, radio) {
     const pts = [];
     for (let i = 0; i <= 360; i += 6) {
       const ang = i * Math.PI / 180;
@@ -555,15 +612,45 @@
       ]);
     }
     pts.push(pts[0]);
-    return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [pts] } };
+    return pts;
   }
 
-  function dibujarGeocercas() {
+  function obtenerCoordsGeocerca(g) {
+    if (g.tipo === 'poligono') {
+      if (!Array.isArray(g.puntos) || g.puntos.length < 3) return null;
+      const pts = g.puntos.map(p => {
+        const lng = p.lng ?? p.lon;
+        return (p.lat != null && lng != null) ? [lng, p.lat] : null;
+      }).filter(Boolean);
+      if (pts.length < 3) return null;
+      // Cerrar el anillo
+      pts.push(pts[0]);
+      return pts;
+    } else {
+      // Circular
+      if (!g.latitudCentro && !g.longitudCentro) return null;
+      return generarCirculoCoords(g.latitudCentro, g.longitudCentro, g.radio);
+    }
+  }
+
+  function dibujarTodasLasGeocercas() {
+    if (!map.isStyleLoaded()) {
+      map.once('style.load', dibujarTodasLasGeocercas);
+      return;
+    }
     geocercas.forEach((g, i) => {
-      const srcId = `cerca-src-${i}`;
+      const srcId   = `cerca-src-${i}`;
       const layFill = `cerca-fill-${i}`;
       const layLine = `cerca-line-${i}`;
-      const geojson = generarCirculoGeoJSON(g.latitudCentro, g.longitudCentro, g.radio);
+
+      const coords = obtenerCoordsGeocerca(g);
+      if (!coords) return;
+
+      const geojson = {
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [coords] }
+      };
+
       if (map.getSource(srcId)) {
         map.getSource(srcId).setData(geojson);
       } else {
@@ -579,7 +666,7 @@
   }
 
   /* ══════════════════════════════════════════
-     FIREBASE — escuchar dispositivos
+     FIREBASE — dispositivos
   ══════════════════════════════════════════ */
   const dispositivosMap = {};
 
@@ -598,9 +685,9 @@
         actualizarMarcador(id, nombre, lat, lon);
         dispositivosMap[id] = { id, nombre, lat, lon };
 
-        // Actualiza info card con el último dispositivo (o puedes mostrar el tuyo específico)
         document.getElementById('dataRows').innerHTML =
-          `Lat: ${lat.toFixed(6)}<br>Lon: ${lon.toFixed(6)}<br>Alt: ${alt ? alt.toFixed(1) + ' m' : 'N/D'}<br>Hora: ${hora || '--'}`;
+          `Lat: ${lat.toFixed(6)}<br>Lon: ${lon.toFixed(6)}<br>` +
+          `Alt: ${alt ? alt.toFixed(1) + ' m' : 'N/D'}<br>Hora: ${hora || '--'}`;
         document.getElementById('tvEstadoGeocerca').textContent = verificarGeocercas(lat, lon);
 
         if (camaraSiguiendo && primeraPosicion) {
@@ -627,36 +714,44 @@
   });
 
   /* ══════════════════════════════════════════
-     FIREBASE — escuchar geocercas
+     FIREBASE — geocercas
+     Lee tanto circulares como poligonales
   ══════════════════════════════════════════ */
   onValue(ref(database, 'geocercas'), snapshot => {
     geocercas.length = 0;
     snapshot.forEach(item => {
       const g = item.val();
-      if (g && g.latitudCentro && g.longitudCentro && g.radio) geocercas.push(g);
+      if (!g || !g.nombre) return;
+
+      // Normalizar tipo
+      if (!g.tipo) g.tipo = 'circulo';
+
+      if (g.tipo === 'poligono') {
+        // Geocerca poligonal: necesita al menos 3 puntos
+        if (Array.isArray(g.puntos) && g.puntos.length >= 3) {
+          geocercas.push(g);
+        }
+      } else {
+        // Geocerca circular: necesita centro + radio
+        if (g.latitudCentro != null && g.longitudCentro != null && g.radio > 0) {
+          geocercas.push(g);
+        }
+      }
     });
 
     renderLista('listaGeocercas', 'cntGeocercas',
       geocercas, crearItemGeocerca, 'Sin geocercas creadas');
 
-    // Redibujar cuando el mapa esté listo
-    if (map.isStyleLoaded()) {
-      dibujarGeocercas();
-    } else {
-      map.once('style.load', dibujarGeocercas);
-    }
+    dibujarTodasLasGeocercas();
   });
 
-  // Redibujar rutas/geocercas al cambiar de estilo (satélite ↔ normal)
+  // Redibujar al cambiar estilo (satélite ↔ normal)
   map.on('style.load', () => {
-    dibujarGeocercas();
-    rutasEscuchadas.forEach(id => {
-      // Las rutas se recrgarán via el listener activo de Firebase
-    });
+    dibujarTodasLasGeocercas();
   });
 
   /* ══════════════════════════════════════════
-     FALLBACK: nodo antiguo "ubicacion" (singular)
+     FALLBACK: nodo "ubicacion" (singular)
   ══════════════════════════════════════════ */
   onValue(ref(database, 'ubicacion'), snapshot => {
     const data = snapshot.val();
